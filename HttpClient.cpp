@@ -1,249 +1,429 @@
+// Class to simplify HTTP fetching on Particle
+// Original version for Arduino https://github.com/amcewen/HttpClient/
+// Released under Apache License, version 2.0 by Kevin Cooper
+
 #include "HttpClient.h"
 #include "application.h"
 
-static const uint16_t kNetworkTimeout = 5*1000; // Allow maximum 5s between data packets.
-/**
-* Constructor.
-*/
+// Initialize constants
+const char* HttpClient::kUserAgent = "Particle/1.0";
+const char* HttpClient::kContentLengthPrefix = HTTP_HEADER_CONTENT_LENGTH ": ";
+
 HttpClient::HttpClient()
 {
-
+  resetState();
 }
 
-void HttpClient::out(const char *s) {
-    client.write( (const uint8_t*)s, strlen(s) );
-    LOGGING_WRITE( (const uint8_t*)s, strlen(s) );
+void HttpClient::resetState()
+{
+  iState = eIdle;
+  iStatusCode = 0;
+  iContentLength = 0;
+  iBodyLengthConsumed = 0;
+  iContentLengthPtr = kContentLengthPrefix;
+  iHttpResponseTimeout = kHttpResponseTimeout;
 }
-/**
-* Method to send a header, should only be called from within the class.
-*/
+
+void HttpClient::stop()
+{
+  iClient.stop();
+  resetState();
+}
+
+void HttpClient::beginRequest()
+{
+  iState = eRequestStarted;
+}
+
+int HttpClient::startRequest(const char* aServerName, uint16_t aServerPort, const char* aURLPath, const char* aHttpMethod, const char* aUserAgent)
+{
+  tHttpState initialState = iState;
+  if ((eIdle != iState) && (eRequestStarted != iState))
+  {
+    return HTTP_ERROR_API;
+  }
+  if (!iClient.connect(aServerName, aServerPort) > 0)
+  {
+#ifdef LOGGING
+    Serial.println("Connection failed");
+#endif
+    return HTTP_ERROR_CONNECTION_FAILED;
+  }
+
+  // Now we're connected, send the first part of the request
+  int ret = sendInitialHeaders(aServerName, IPAddress(0,0,0,0), aServerPort, aURLPath, aHttpMethod, aUserAgent);
+  if ((initialState == eIdle) && (HTTP_SUCCESS == ret))
+  {
+    // This was a simple version of the API, so terminate the headers now
+    finishHeaders();
+  }
+  // else we'll call it in endRequest or in the first call to print, etc.
+
+  return ret;
+}
+
+int HttpClient::startRequest(const IPAddress& aServerAddress, const char* aServerName, uint16_t aServerPort, const char* aURLPath, const char* aHttpMethod, const char* aUserAgent)
+{
+  tHttpState initialState = iState;
+  if ((eIdle != iState) && (eRequestStarted != iState))
+  {
+    return HTTP_ERROR_API;
+  }
+
+  if (!iClient.connect(aServerAddress, aServerPort) > 0)
+  {
+#ifdef LOGGING
+    Serial.println("Connection failed");
+#endif
+    return HTTP_ERROR_CONNECTION_FAILED;
+  }
+
+  // Now we're connected, send the first part of the request
+  int ret = sendInitialHeaders(aServerName, aServerAddress, aServerPort, aURLPath, aHttpMethod, aUserAgent);
+  if ((initialState == eIdle) && (HTTP_SUCCESS == ret))
+  {
+    // This was a simple version of the API, so terminate the headers now
+    finishHeaders();
+  }
+  // else we'll call it in endRequest or in the first call to print, etc.
+
+  return ret;
+}
+
+int HttpClient::sendInitialHeaders(const char* aServerName, IPAddress aServerIP, uint16_t aPort, const char* aURLPath, const char* aHttpMethod, const char* aUserAgent)
+{
+#ifdef LOGGING
+  Serial.println("Connected");
+#endif
+  // Send the HTTP command, i.e. "GET /somepath/ HTTP/1.0"
+  sendRequest(aHttpMethod, aURLPath);
+
+  iClient.print("HOST: ");
+
+  if (aServerName)
+  {
+    iClient.print(aServerName);
+  }
+  else
+  {
+    String ip = String(aServerIP[0]) + "." +
+                String(aServerIP[1]) + "." +
+                String(aServerIP[2]) + "." +
+                String(aServerIP[3]);
+    iClient.print(ip);
+  }
+
+  if (aPort != kHttpPort)
+  {
+    iClient.print(":");
+    iClient.print(aPort);
+  }
+  iClient.println();
+
+  // And user-agent string
+  if (aUserAgent)
+  {
+    sendHeader(HTTP_HEADER_USER_AGENT, aUserAgent);
+  }
+  else
+  {
+    sendHeader(HTTP_HEADER_USER_AGENT, kUserAgent);
+  }
+  // We don't support persistent connections, so tell the server to
+  // close this connection after we're done
+  sendHeader(HTTP_HEADER_CONNECTION, "close");
+
+  // Everything has gone well
+  iState = eRequestStarted;
+  return HTTP_SUCCESS;
+}
+
 void HttpClient::sendRequest(const char* aHttpMethod, const char* aRequestPath)
 {
-    sprintf(buffer, "%s %s HTTP/1.0\r\n", aHttpMethod, aRequestPath);
-    out(buffer);
+  int bufferSize = strlen(aHttpMethod)+strlen(aRequestPath) + 11;
+  char buffer[bufferSize];
+  sprintf(buffer, "%s %s HTTP/1.0", aHttpMethod, aRequestPath);
+  iClient.println(buffer);
 }
 
-void HttpClient::sendBody(const char* aRequestBody)
+void HttpClient::sendHeader(const char* aHeader)
 {
-    out(aRequestBody);
+  iClient.println(aHeader);
 }
+
 void HttpClient::sendHeader(const char* aHeaderName, const char* aHeaderValue)
 {
-    sprintf(buffer, "%s: %s\r\n", aHeaderName, aHeaderValue);
-    out(buffer);
+  iClient.print(aHeaderName);
+  iClient.print(": ");
+  iClient.println(aHeaderValue);
 }
 
 void HttpClient::sendHeader(const char* aHeaderName, const int aHeaderValue)
 {
-    sprintf(buffer, "%s: %d\r\n", aHeaderName, aHeaderValue);
-    out(buffer);
+  iClient.print(aHeaderName);
+  iClient.print(": ");
+  iClient.println(aHeaderValue);
 }
 
-void HttpClient::sendHeader(const char* aHeaderName)
+void HttpClient::finishHeaders()
 {
-    sprintf(buffer, "%s\r\n", aHeaderName);
-    out(buffer);
+  iClient.println();
+  iState = eRequestSent;
 }
 
-/**
-* Method to send an HTTP Request. Allocate variables in your application code
-* in the aResponse struct and set the headers and the options in the aRequest
-* struct.
-*/
-void HttpClient::request(http_request_t &aRequest, http_response_t &aResponse, http_header_t headers[], const char* aHttpMethod)
+void HttpClient::endRequest()
 {
-    // If a proper response code isn't received it will be set to -1.
-    aResponse.status = -1;
+  if (iState < eRequestSent)
+  {
+    // We still need to finish off the headers
+    finishHeaders();
+  }
+  // else the end of headers has already been sent, so nothing to do here
+}
 
-    // NOTE: The default port tertiary statement is unpredictable if the request structure is not initialised
-    // http_request_t request = {0} or memset(&request, 0, sizeof(http_request_t)) should be used
-    // to ensure all fields are zero
-    bool connected = false;
-    aRequest.port = aRequest.port > 0 ? aRequest.port : 80;
+int HttpClient::responseStatusCode()
+{
+  if (iState < eRequestSent)
+  {
+    return HTTP_ERROR_API;
+  }
+  // The first line will be of the form Status-Line:
+  //   HTTP-Version SP Status-Code SP Reason-Phrase CRLF
+  // Where HTTP-Version is of the form:
+  //   HTTP-Version   = "HTTP" "/" 1*DIGIT "." 1*DIGIT
 
-    // If an IP has been defined connect using that, else use hostname.
-    if ((aRequest.ip == (uint32_t) 0) == false) {
-      LOGGING_PRINT("HttpClient>\tConnecting via IP: ");
-      LOGGING_PRINT(aRequest.ip);
-      connected = client.connect(aRequest.ip, aRequest.port);
-    } else if (aRequest.hostname != NULL) {
-      LOGGING_PRINT("HttpClient>\tConnecting via hostname: ");
-      LOGGING_PRINT(aRequest.hostname);
-      connected = client.connect(aRequest.hostname.c_str(), aRequest.port);
-    } else {
-      LOGGING_PRINT("HttpClient>\tNo hostname or IP defined: ");
-    }
+  char c = '\0';
+  do
+  {
+    // Make sure the status code is reset, and likewise the state.  This
+    // lets us easily cope with 1xx informational responses by just
+    // ignoring them really, and reading the next line for a proper response
+    iStatusCode = 0;
+    iState = eRequestSent;
 
-    LOGGING_PRINT(":");
-    LOGGING_PRINTLN(aRequest.port);
-
-    if (!connected) {
-      LOGGING_PRINTLN("HttpClient>\tConnection failed.");
-      client.stop();
-      // If TCP Client can't connect to host, exit here.
-      return;
-    }
-
-    //
-    // Send HTTP Headers
-    //
-
-    // Send initial headers (only HTTP 1.0 is supported for now).
-    LOGGING_PRINTLN("HttpClient>\tStart of HTTP Request.");
-
-    // Send General and Request Headers.
-    sendRequest(aHttpMethod, aRequest.path.c_str());
-
-    // To meet HTTP 1.1 spec always send HOST header.
-    if(aRequest.hostname!=NULL) {
-      sendHeader("HOST", aRequest.hostname.c_str());
-    } else {
-      String ip = String(aRequest.ip[0]) + "." +
-                  String(aRequest.ip[1]) + "." +
-                  String(aRequest.ip[2]) + "." +
-                  String(aRequest.ip[3]);
-      sendHeader("HOST", ip.c_str());
-    }
-
-    sendHeader("User-Agent", kUserAgent);
-
-    sendHeader("Connection", "close"); // Not supporting keep-alive for now.
-
-    //Send Entity Headers
-    // TODO: Check the standard, currently sending Content-Length : 0 for empty
-    // POST requests, and no content-length for other types.
-    if (aRequest.body != NULL) {
-        sendHeader("Content-Length", (aRequest.body).length());
-    } else if (strcmp(aHttpMethod, HTTP_METHOD_POST) == 0) { //Check to see if its a Post method.
-        sendHeader("Content-Length", 0);
-    }
-
-    if (headers != NULL)
+    unsigned long timeoutStart = millis();
+    // Psuedo-regexp we're expecting before the status-code
+    const char* statusPrefix = "HTTP/*.* ";
+    const char* statusPtr = statusPrefix;
+    // Whilst we haven't timed out & haven't reached the end of the headers
+    while ((c != '\n') &&
+          ( (millis() - timeoutStart) < iHttpResponseTimeout ))
     {
-        int i = 0;
-        while (headers[i].header != NULL)
+      if (available())
+      {
+        c = read();
+        if (c != -1)
         {
-            if (headers[i].value != NULL) {
-                sendHeader(headers[i].header, headers[i].value);
-            } else {
-                sendHeader(headers[i].header);
+          switch(iState)
+          {
+            case eRequestSent:
+              // We haven't reached the status code yet
+              if ( (*statusPtr == '*') || (*statusPtr == c) )
+              {
+                // This character matches, just move along
+                statusPtr++;
+                if (*statusPtr == '\0')
+                {
+                  // We've reached the end of the prefix
+                  iState = eReadingStatusCode;
+                }
+              }
+              else
+              {
+                return HTTP_ERROR_INVALID_RESPONSE;
+              }
+              break;
+            case eReadingStatusCode:
+              if (isdigit(c))
+              {
+                // This assumes we won't get more than the 3 digits we
+                // want
+                iStatusCode = iStatusCode*10 + (c - '0');
+              }
+              else
+              {
+                // We've reached the end of the status code
+                // We could sanity check it here or double-check for ' '
+                // rather than anything else, but let's be lenient
+                iState = eStatusCodeRead;
+              }
+              break;
+            case eStatusCodeRead:
+              // We're just waiting for the end of the line now
+              break;
+          };
+          // We read something, reset the timeout counter
+          timeoutStart = millis();
+        }
+      }
+      else
+      {
+        // We haven't got any data, so let's pause to allow some to
+        // arrive
+        delay(kHttpWaitForDataDelay);
+      }
+    }
+    if ( (c == '\n') && (iStatusCode < 200) )
+    {
+      // We've reached the end of an informational status line
+      c = '\0'; // Clear c so we'll go back into the data reading loop
+    }
+  } while ( (iState == eStatusCodeRead) && (iStatusCode < 200) );
+  // If we've read a status code successfully but it's informational (1xx)
+  // loop back to the start
+
+  if ( (c == '\n') && (iState == eStatusCodeRead) )
+  {
+    // We've read the status-line successfully
+    return iStatusCode;
+  }
+  else if (c != '\n')
+  {
+    // We must've timed out before we reached the end of the line
+    return HTTP_ERROR_TIMED_OUT;
+  }
+  else
+  {
+    // This wasn't a properly formed status line, or at least not one we
+    // could understand
+    return HTTP_ERROR_INVALID_RESPONSE;
+  }
+}
+
+int HttpClient::skipResponseHeaders()
+{
+    // Just keep reading until we finish reading the headers or time out
+    unsigned long timeoutStart = millis();
+    // Whilst we haven't timed out & haven't reached the end of the headers
+    while ((!endOfHeadersReached()) &&
+           ( (millis() - timeoutStart) < iHttpResponseTimeout ))
+    {
+        if (available())
+        {
+            (void)readHeader();
+            // We read something, reset the timeout counter
+            timeoutStart = millis();
+        }
+        else
+        {
+            // We haven't got any data, so let's pause to allow some to
+            // arrive
+            delay(kHttpWaitForDataDelay);
+        }
+    }
+    if (endOfHeadersReached())
+    {
+        // Success
+        return HTTP_SUCCESS;
+    }
+    else
+    {
+        // We must've timed out
+        return HTTP_ERROR_TIMED_OUT;
+    }
+}
+
+bool HttpClient::endOfBodyReached()
+{
+    if (endOfHeadersReached() && (contentLength() != kNoContentLengthHeader))
+    {
+        // We've got to the body and we know how long it will be
+        return (iBodyLengthConsumed >= contentLength());
+    }
+    return false;
+}
+
+int HttpClient::read()
+{
+  int ret = iClient.read();
+  //char c = ret;     // TO VIEW ALL READS UNCOMMENT
+  //Serial.print(c);  // THESE TWO LINES
+
+  if (ret >= 0)
+  {
+    if (endOfHeadersReached() && iContentLength > 0)
+    {
+      // We're outputting the body now and we've seen a Content-Length header
+      // So keep track of how many bytes are left
+      iBodyLengthConsumed++;
+    }
+  }
+  return ret;
+}
+
+int HttpClient::readHeader()
+{
+    char c = read();
+
+    if (endOfHeadersReached())
+    {
+        // We've passed the headers, but rather than return an error, we'll just
+        // act as a slightly less efficient version of read()
+        return c;
+    }
+
+    // Whilst reading out the headers to whoever wants them, we'll keep an
+    // eye out for the "Content-Length" header
+    switch(iState)
+    {
+    case eStatusCodeRead:
+        // We're at the start of a line, or somewhere in the middle of reading
+        // the Content-Length prefix
+        if (*iContentLengthPtr == c)
+        {
+            // This character matches, just move along
+            iContentLengthPtr++;
+            if (*iContentLengthPtr == '\0')
+            {
+                // We've reached the end of the prefix
+                iState = eReadingContentLength;
+                // Just in case we get multiple Content-Length headers, this
+                // will ensure we just get the value of the last one
+                iContentLength = 0;
             }
-            i++;
         }
+        else if ((iContentLengthPtr == kContentLengthPrefix) && (c == '\r'))
+        {
+            // We've found a '\r' at the start of a line, so this is probably
+            // the end of the headers
+            iState = eLineStartingCRFound;
+        }
+        else
+        {
+            // This isn't the Content-Length header, skip to the end of the line
+            iState = eSkipToEndOfHeader;
+        }
+        break;
+    case eReadingContentLength:
+        if (isdigit(c))
+        {
+            iContentLength = iContentLength*10 + (c - '0');
+        }
+        else
+        {
+            // We've reached the end of the content length
+            // We could sanity check it here or double-check for "\r\n"
+            // rather than anything else, but let's be lenient
+            iState = eSkipToEndOfHeader;
+        }
+        break;
+    case eLineStartingCRFound:
+        if (c == '\n')
+        {
+            iState = eReadingBody;
+        }
+        break;
+    default:
+        // We're just waiting for the end of the line now
+        break;
+    };
+
+    if ( (c == '\n') && !endOfHeadersReached() )
+    {
+        // We've got to the end of this line, start processing again
+        iState = eStatusCodeRead;
+        iContentLengthPtr = kContentLengthPrefix;
     }
-
-    // Empty line to finish headers
-    out("\r\n");
-    client.flush();
-
-    //
-    // Send HTTP Request Body
-    //
-
-    if (aRequest.body != NULL) {
-        sendBody(aRequest.body.c_str());
-    }
-
-    LOGGING_PRINTLN("HttpClient>\tEnd of HTTP Request.");
-
-    //
-    // Receive HTTP Response
-    //
-    // The first value of client.available() might not represent the
-    // whole response, so after the first chunk of data is received instead
-    // of terminating the connection there is a delay and another attempt
-    // to read data.
-    // The loop exits when the connection is closed, or if there is a
-    // timeout or an error.
-
-    // clear response buffer
-    memset(&buffer[0], 0, sizeof(buffer));
-    unsigned int bufferPosition = 0;
-    unsigned long lastRead = millis();
-  #ifdef LOGGING
-    unsigned long firstRead = millis();
-  #endif
-    bool error = false;
-    bool timeout = false;
-
-    do {
-        #ifdef LOGGING
-        int bytes = client.available();
-        if(bytes) {
-            LOGGING_PRINT("\r\nHttpClient>\tReceiving TCP transaction of ");
-            LOGGING_PRINT(bytes);
-            LOGGING_PRINTLN(" bytes.");
-        }
-        #endif
-
-        while (client.available()) {
-            char c = client.read();
-            LOGGING_PRINT(c);
-            lastRead = millis();
-
-            if (c == -1) {
-                error = true;
-                LOGGING_PRINTLN("HttpClient>\tError: No data available.");
-                break;
-            }
-
-            // Check that received character fits in buffer before storing.
-            if (bufferPosition < sizeof(buffer)-1) {
-                buffer[bufferPosition] = c;
-            } else if ((bufferPosition == sizeof(buffer)-1)) {
-                buffer[bufferPosition] = '\0'; // Null-terminate buffer
-                client.stop();
-                error = true;
-
-                LOGGING_PRINTLN("HttpClient>\tError: Response body larger than buffer.");
-            }
-            bufferPosition++;
-        }
-
-        #ifdef LOGGING
-        if (bytes) {
-            LOGGING_PRINT("\r\nHttpClient>\tEnd of TCP transaction.");
-        }
-        #endif
-
-        // Check that there hasn't been more than 5s since last read.
-        timeout = millis() - lastRead > kNetworkTimeout;
-
-        // Unless there has been an error or timeout wait 200ms to allow server
-        // to respond or close connection.
-        if (!error && !timeout) {
-            delay(200);
-        }
-    } while (client.connected() && !timeout && !error);
-
-    #ifdef LOGGING
-    if (timeout) {
-        LOGGING_PRINTLN("\r\nHttpClient>\tError: Timeout while reading response.");
-    }
-    LOGGING_PRINT("\r\nHttpClient>\tEnd of HTTP Response (");
-    LOGGING_PRINT(millis() - firstRead);
-    LOGGING_PRINTLN("ms).");
-    #endif
-    client.stop();
-
-    String raw_response(buffer);
-
-    // Not super elegant way of finding the status code, but it works.
-    String statusCode = raw_response.substring(9,12);
-
-    LOGGING_PRINT("HttpClient>\tStatus Code: ");
-    LOGGING_PRINTLN(statusCode);
-
-    int bodyPos = raw_response.indexOf("\r\n\r\n");
-    if (bodyPos == -1) {
-        #ifdef LOGGING
-        LOGGING_PRINTLN("HttpClient>\tError: Can't find HTTP response body.");
-        #endif
-
-        return;
-    }
-    // Return the entire message body from bodyPos+4 till end.
-    aResponse.body = "";
-    aResponse.body += raw_response.substring(bodyPos+4);
-    aResponse.status = atoi(statusCode.c_str());
+    // And return the character read to whoever wants it
+    return c;
 }

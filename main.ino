@@ -20,6 +20,33 @@ enum { // WEATHER STATES
 };
 
 HttpClient http;
+
+// If Content-Length isn't given this is used for the body length increments
+const int kFallbackContentLength = 100;
+
+typedef struct
+{
+  String hostname;
+  IPAddress ip;
+  String path;
+  int port;
+  String body;
+} http_request_t;
+
+/**
+ * HTTP Response struct.
+ * status  response status code.
+ * body    response body
+ */
+typedef struct
+{
+  int status;
+  String body;
+} http_response_t;
+
+http_response_t response;
+http_request_t request;
+
 bool firstRun = true;
 
 unsigned long resetTime = 0;
@@ -41,16 +68,91 @@ int weather_state = WEATHER_READY;
 unsigned long nextWeatherUpdate = 0;
 unsigned long nextDisplayUpdate = 0;
 
-// Headers currently need to be set at init, useful for API keys etc.
-http_header_t headers[] = {
-  //  { "Content-Type", "application/json" },
-  //  { "Accept" , "application/json" },
-  { "Accept" , "*/*"},
-  { NULL, NULL } // NOTE: Always terminate headers will NULL
-};
+void doGetRequest() {
+  int err = 0;
+  response.status = 0;
+  response.body = '\0';
+//  unsigned long httpStartTime = millis();
 
-http_request_t request;
-http_response_t response;
+  // Using IP
+  err = http.get(request.ip, request.hostname, request.path);
+
+  if (err == 0)
+  {
+    err = http.responseStatusCode();
+    if (err >= 0)
+    {
+      response.status = err;
+
+      if (err >= 200 || err < 300)
+      {
+        err = http.skipResponseHeaders();
+        if (err >= 0)
+        {
+          int bodyLen = http.contentLength();
+
+          // Now we've got to the body, so we can print it out
+          unsigned long timeoutStart = millis();
+          if (bodyLen <= 0)
+            bodyLen = kFallbackContentLength;
+
+          char *body = (char *) malloc( sizeof(char) * ( bodyLen + 1 ) );
+
+          char c;
+          int i = 0;
+          // Whilst we haven't timed out & haven't reached the end of the body
+          while ( (http.connected() || http.available()) &&
+                 ((millis() - timeoutStart) < http.kHttpResponseTimeout))
+          {
+            // Let's make sure this character will fit into our char array
+            if (i == bodyLen)
+            {
+              // No it won't fit. Let's try and resize our body char array
+              char *temp = (char *) realloc(body, sizeof(char) * (bodyLen+kFallbackContentLength));
+
+              if ( temp != NULL ) //resize was successful
+              {
+                bodyLen += kFallbackContentLength;
+                body = temp;
+              }
+              else //there was an error
+              {
+                free(temp);
+                break;
+              }
+            }
+
+            if (http.available())
+            {
+              c = http.read();
+
+              body[i] = c;
+              i++;
+              // We read something, reset the timeout counter
+              timeoutStart = millis();
+            }
+            else
+            {
+              // We haven't got any data, so let's pause to allow some to
+              // arrive
+              delay(http.kHttpWaitForDataDelay);
+            }
+          }
+          body[i] = '\0';
+          //return body;
+          response.body = String(body);
+          free(body);
+        }
+      }
+    }
+  }
+  http.stop();
+
+//  Serial.println();
+//  Serial.print("http request took : ");
+//  Serial.print(millis()-httpStartTime);
+//  Serial.println("ms");
+}
 
 char *getDayOfMonthSuffix(int n) {
   if (n >= 11 && n <= 13) {
@@ -157,8 +259,6 @@ int weatherDescriptionToInt(char* description) {
 
 //Updates Weather Forecast Data
 void getWeather() {
-  //  Serial.print("in getWeather");
-  //  Serial.println();
   weather_state = WEATHER_REQUESTING;
   // publish the event that will trigger our webhook
   Particle.publish(HOOK_PUB);
@@ -267,13 +367,12 @@ void setup() {
     delay(10);
   } while (resetTime < 1000000 && millis() < 20000);
 
-  request.ip = MYIP;
-  request.hostname = MYURL;
+  request.ip = { 80, 243, 190, 58 };
+  request.hostname = "emoncms.org";
 
   setText(0, "txtLoading", "Downloading weather data...");
   getWeather();
   setText(0, "txtLoading", "Downloading power data...");
-//  setText(1, "txtDebug", String(Time.hour()));
 }
 
 void loop() {
@@ -287,7 +386,7 @@ void loop() {
   {
     // Get request
     request.path = "/feed/list.json?apikey=APIKEY";
-    http.get(request, response, headers);
+    doGetRequest();
 
     int watts = getJsonValue("watts",response.body).toInt();
     float temperature = getJsonValue("temperature",response.body).toFloat();
@@ -327,14 +426,14 @@ void loop() {
       setText(1, "txtDate", buffer);
 
       // YESTERDAY'S kWh
-      request.path = "/feed/data.json?apikey=APIKEYid=4&start=";
+      request.path = "/feed/data.json?apikey=APIKEY&id=4&start=";
       request.path.concat(Time.now()-86400);
       request.path.concat("000");
       request.path.concat("&end=");
       request.path.concat(Time.now());
       request.path.concat("000");
       request.path.concat("&interval=86400&skipmissing=1&limitinterval=0");
-      http.get(request, response, headers);
+      doGetRequest();
       float yesterdaykWh = getYesterdaykWh(response.body);
 
       setText(1, "txtYestkWh", String(yesterdaykWh, 1)+"kWh");
