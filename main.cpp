@@ -15,6 +15,7 @@ retained int sleep_state_request = STATE_AWAKE;
 bool sofaOccupied = false;
 
 unsigned long resetTime = 0;
+String firmwareVersion;
 volatile unsigned long pir_detection_time;
 int lastDay;
 int lastWattsPic;
@@ -283,24 +284,26 @@ void setup() {
   nexSerial.begin(115200);
   nextion.execute();
 
-  if (sleep_state != STATE_AWAKE)
-  {
-    nextion.setSleep(false);
-    sleep_state = STATE_AWAKE;
-    sleep_state_request = STATE_AWAKE;
-  }
-
-  firstRun = true;
-
+  nextion.setSleep(false);
   nextion.setBrightness(DISPLAY_BRIGHTNESS);
+
   nextion.setText(0, "txtLoading", "Initialising...");
 
-  Particle.function("nextionrun", nextionrun);
-  Spark.variable("resetTime", &resetTime, INT);
-  Particle.subscribe(WEATHER_HOOK_RESP, processWeatherData, MY_DEVICES);
-  Particle.subscribe("HOME_LOG", homeLogEvent, MY_DEVICES);
+  firstRun = true;
+  sleep_state = STATE_AWAKE;
+  sleep_state_request = STATE_AWAKE;
+  firmwareVersion = System.version();
+
+  pinMode(PIR_PIN, INPUT_PULLDOWN);
+  attachInterrupt(PIR_PIN, pir_changed, RISING);
 
   waitUntil(Particle.connected);
+
+  Particle.function("nextionrun", nextionrun);
+  Particle.variable("resetTime", resetTime);
+  Particle.variable("sysVersion", firmwareVersion);
+  Particle.subscribe(WEATHER_HOOK_RESP, processWeatherData, MY_DEVICES);
+  Particle.subscribe("HOME_LOG", homeLogEvent, MY_DEVICES);
 
   Time.zone(TIMEZONE_OFFSET);
   do
@@ -309,8 +312,7 @@ void setup() {
     delay(10);
   } while (resetTime < 1000000 && millis() < 20000);
 
-  pinMode(PIR_PIN, INPUT_PULLDOWN);
-  attachInterrupt(PIR_PIN, pir_changed, RISING);
+  pir_detection_time = millis();
 
   request.ip = EMONCMS_IP;
   request.hostname = EMONCMS_URL;
@@ -334,9 +336,8 @@ void loop() {
     if (current_millis > nextDisplayUpdate)
     {
       // Get request
-      request.path = "/feed/list.json?apikey=" + API_KEY;
+      request.path = String::format("/feed/list.json?apikey=%s", API_KEY);
       doGetRequest();
-
       int watts = getJsonValue("watts", response.body).toInt();
       float temperature = getJsonValue("temperature", response.body).toFloat();
       float humidity = getJsonValue("humidity", response.body).toFloat();
@@ -373,14 +374,9 @@ void loop() {
           monthsOfYear[monthOfYear], Time.year()));
 
         // YESTERDAY'S kWh
-        request.path = "/feed/data.json?id=4&start=";
-        request.path.concat(Time.now()-86400);
-        request.path.concat("000");
-        request.path.concat("&end=");
-        request.path.concat(Time.now());
-        request.path.concat("000");
-        request.path.concat("&interval=86400&skipmissing=1&limitinterval=0&apikey=");
-        request.path.concat(API_KEY);
+        request.path = String::format(
+          "/feed/data.json?id=4&start=%d000&end=%d000&interval=86400&skipmissing=1&limitinterval=0&apikey=%s",
+          Time.now()-86400, Time.now(), API_KEY);
         doGetRequest();
         float yesterdaykWh = getYesterdaykWh(response.body);
 
@@ -410,7 +406,6 @@ void loop() {
       lastWattsPic = wattsPic;
       nextDisplayUpdate = millis() + DISPLAY_UPDATE_INTERVAL;
     }
-
     if (weather_state == WEATHER_AVAILABLE)
     {
       for (int i = 0; i < 4; i++)
@@ -452,8 +447,8 @@ void loop() {
         nextion.setBrightness(0);
         break;
       case STATE_SCREEN_OFF:
-        nextion.setSleep(true);
         nextion.setPage(0);
+        nextion.setSleep(true);
         Particle.publish("HOME_LOG", "SLEEP", 60, PRIVATE);
 
         while (millis() < (current_millis+5000UL))

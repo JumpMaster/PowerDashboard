@@ -6,13 +6,13 @@
 
 const unsigned long DISPLAY_UPDATE_INTERVAL = 5000; // 5 Seconds
 const unsigned long WEATHER_UPDATE_INTERVAL = 1800000; // 30 minutes
-const unsigned long DISPLAY_DIM_TIME = 300000; // 5 minutes
+const unsigned long DISPLAY_DIM_TIME = 600000; // 10 minutes
 const unsigned long DISPLAY_SLEEP_TIME = 1800000; // 30 minutes
 
 const char * daysOfWeek[7] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 const char * monthsOfYear[12] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
 
-const int TIMEZONE_OFFSET = 1;
+const int TIMEZONE_OFFSET = 0;
 const int gauge_max = 4000;
 const int DISPLAY_BRIGHTNESS = 50;
 const int PIR_PIN = WKP;
@@ -20,9 +20,9 @@ const int PIR_PIN = WKP;
 // If Content-Length isn't given this is used for the body length increments
 const int kFallbackContentLength = 100;
 
-const String EMONCMS_URL = "emoncms.org";
+const String EMONCMS_URL[] = "emoncms.org";
 const byte EMONCMS_IP[] = { 80, 243, 190, 58 };
-const String API_KEY = "MYAPIKEY";
+const String API_KEY[] = "MYAPIKEY";
 
 enum { // WEATHER STATES
   WEATHER_READY,
