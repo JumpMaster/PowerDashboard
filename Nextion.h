@@ -18,6 +18,9 @@ public:
   void setPage(const int page);
   void setBrightness(const int brightness);
   void setSleep(const bool sleep);
+  void stopRefreshing();
+  void startRefreshing();
+  void reset();
 
 protected:
 };
