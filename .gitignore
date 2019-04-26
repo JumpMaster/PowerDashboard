@@ -7,7 +7,6 @@ secrets.h
 # Particle Compiled Firmware
 target/ 
 *.bin
-src/
 
 # Prerequisites
 *.d
