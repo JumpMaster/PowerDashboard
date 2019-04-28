@@ -1,7 +1,7 @@
 #ifndef Nextion_h
 #define Nextion_h
 
-#include "application.h"
+#include "Particle.h"
 
 #define nexSerial Serial1
 
