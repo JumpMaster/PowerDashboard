@@ -9,7 +9,6 @@
 // Stubs
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 
-
 Nextion nextion;
 
 bool firstRun = true;
@@ -20,7 +19,6 @@ bool sofaOccupied = false;
 int sofaPositions[3];
 
 unsigned long resetTime = 0;
-volatile unsigned long pir_detection_time;
 int lastDay;
 int lastUsePic;
 int todayIcon = 14;
@@ -32,12 +30,14 @@ int weather_state = WEATHER_READY;
 unsigned long nextWeatherUpdate = 0;
 
 PublishQueue pq;
-
+/*
 unsigned long lastPirMqttUpdate;
 long timeBetweenPirUpdates = 15000;
 uint16_t pirDetectionLength = 10000;
 bool pirState;
 uint32_t nextMqttCheckin;
+*/
+volatile unsigned long pir_detection_time;
 
 bool useUpdated;
 bool temperatureUpdated;
@@ -95,6 +95,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             yesterdayKwh = newYesterdayKwh;
             yesterdayKwhUpdated = true;
         }
+    } else if (strcmp(topic, "home/zigbee2mqtt/living_room_occupancy") == 0) {
+        if (strstr(p, "\"occupancy\":true"))
+            pir_detection_time = millis();
     } else if (strncmp(topic, "home/sofa/seat/", 15) == 0) {
         int seat = topic[15] - '0';
         sofaPositions[seat-1] = atoi(p);
@@ -110,10 +113,11 @@ void connectToMQTT() {
         mqttClient.subscribe("emon/particle/#");
         mqttClient.subscribe("emon/nodered/#");
         mqttClient.subscribe("home/sofa/seat/+/position");
+        mqttClient.subscribe("home/zigbee2mqtt/living_room_occupancy");
     } else
         Log.info("MQTT failed to connect");
 }
-
+/*
 void sendPirMqttUpdate(bool detected) {
     if (mqttClient.isConnected()) {
         mqttClient.publish("home/sensor/nextion_pir/state", detected ? "1" : "0", true);
@@ -121,7 +125,7 @@ void sendPirMqttUpdate(bool detected) {
         lastPirMqttUpdate = millis();
     }
 }
-
+*/
 ApplicationWatchdog wd(60000, System.reset);
 
 bool isDST()
@@ -277,10 +281,10 @@ void setup() {
     delay(200);
     nextion.setBrightness(DISPLAY_BRIGHTNESS);
     nextion.setText(0, "txtLoading", "Initialising...");
-    
+    /*
     pinMode(PIR_PIN, INPUT_PULLDOWN);
     attachInterrupt(PIR_PIN, pir_changed, RISING);
-    
+    */
     // waitUntil(Particle.connected);
     
     do {
@@ -451,18 +455,18 @@ void loop() {
         Log.info("MQTT Disconnected");
         connectToMQTT();
     }
-    
+    /*
     if (!pirState && (millis() - pir_detection_time) < pirDetectionLength)
         sendPirMqttUpdate(true);
     else if (pirState &&  (millis() - lastPirMqttUpdate) > pirDetectionLength)
         sendPirMqttUpdate(false);
-
+    
     if (mqttClient.isConnected() && millis() > nextMqttCheckin) {
         nextMqttCheckin = millis() + 300000;
         // mqttClient.publish("home/particle/checkin", System.deviceID());
     }
-    
-//   nextion.setText(1, "txtDebug", String(pir_detection_time));
+    */
+    nextion.setText(1, "txtDebug", String(pir_detection_time));
     pq.process();
     wd.checkin();
 }
