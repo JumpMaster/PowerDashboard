@@ -11,7 +11,7 @@ void Nextion::execute() {
   nexSerial.write(0xFF);
 }
 
-void Nextion::run(String command) {
+void Nextion::run(const char *command) {
   nexSerial.write(command);
   execute();
 }
