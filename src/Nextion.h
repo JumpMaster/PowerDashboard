@@ -11,7 +11,7 @@ public:
   Nextion(void);
 
   void execute();
-  void run(String command);
+  void run(const char *command);
   void setPic(const int page, const char* name, const int pic);
   void setText(const int page, const char* name, const char* value);
   void refreshComponent(const char* name);

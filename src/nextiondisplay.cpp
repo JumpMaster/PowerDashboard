@@ -32,15 +32,9 @@ int weather_state = WEATHER_READY;
 unsigned long nextWeatherUpdate = 0;
 
 PublishQueue pq;
-/*
-unsigned long lastPirMqttUpdate;
-long timeBetweenPirUpdates = 15000;
-uint16_t pirDetectionLength = 10000;
-bool pirState;
-uint32_t nextMqttCheckin;
-*/
-unsigned long pir_detection_time;
-unsigned long nextInternalTemperatureCheck;
+
+volatile unsigned long pir_detection_time;
+
 bool useUpdated;
 bool temperatureUpdated;
 bool humidityUpdated;
@@ -123,15 +117,7 @@ void connectToMQTT() {
     } else
         Log.info("MQTT failed to connect");
 }
-/*
-void sendPirMqttUpdate(bool detected) {
-    if (mqttClient.isConnected()) {
-        mqttClient.publish("home/sensor/nextion_pir/state", detected ? "1" : "0", true);
-        pirState = detected;
-        lastPirMqttUpdate = millis();
-    }
-}
-*/
+
 ApplicationWatchdog wd(60000, System.reset);
 
 bool isDST()
@@ -260,11 +246,6 @@ void processWeatherData(const char *name, const char *data) {
     nextWeatherUpdate = millis() + WEATHER_UPDATE_INTERVAL;
 }
 
-void pir_changed()
-{
-    pir_detection_time = millis();
-}
-
 int nextionrun(String command)
 {
     nextion.run(command);
@@ -279,30 +260,19 @@ void random_seed_from_cloud(unsigned seed) {
 SYSTEM_THREAD(ENABLED);
 
 void setup() {
-    // pinMode(D11, OUTPUT);
-    // digitalWrite(D11, LOW);
     
     nexSerial.begin(115200);
     nextion.setSleep(false);
     delay(200);
     nextion.setBrightness(DISPLAY_BRIGHTNESS);
     nextion.setText(0, "txtLoading", "Initialising...");
-    /*
-    pinMode(PIR_PIN, INPUT_PULLDOWN);
-    attachInterrupt(PIR_PIN, pir_changed, RISING);
-    */
-    // waitUntil(Particle.connected);
+ 
+    waitFor(Particle.connected, 30000);
+    
+    if (!Particle.connected)
+        System.reset();
     
     do {
-        delay(10);
-    } while (millis() < 30000 && !Particle.connected);
-    
-    if (!Particle.connected) {
-        System.reset();
-    }
-    
-    do
-    {
         resetTime = Time.now();
         delay(10);
     } while (resetTime < 1000000UL && millis() < 20000);
@@ -311,7 +281,6 @@ void setup() {
     Particle.function("nextionrun", nextionrun);
     
     Particle.subscribe(WEATHER_HOOK_RESP, processWeatherData, MY_DEVICES);
-    // Particle.subscribe("HOME_LOG", homeLogEvent, MY_DEVICES);
     
     Log.info("Display is online");
     
@@ -516,7 +485,7 @@ void loop() {
         // mqttClient.publish("home/particle/checkin", System.deviceID());
     }
     */
-    nextion.setText(1, "txtDebug", String(pir_detection_time));
+    // nextion.setText(1, "txtDebug", String(pir_detection_time));
     pq.process();
     wd.checkin();
 }
