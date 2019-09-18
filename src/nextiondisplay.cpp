@@ -5,6 +5,8 @@
 #include "Nextion.h"
 #include "mqtt.h"
 #include "secrets.h"
+#include "Adafruit_Sensor.h"
+#include "Adafruit_BME280.h"
 
 // Stubs
 void mqttCallback(char* topic, byte* payload, unsigned int length);
@@ -37,8 +39,8 @@ uint16_t pirDetectionLength = 10000;
 bool pirState;
 uint32_t nextMqttCheckin;
 */
-volatile unsigned long pir_detection_time;
-
+unsigned long pir_detection_time;
+unsigned long nextInternalTemperatureCheck;
 bool useUpdated;
 bool temperatureUpdated;
 bool humidityUpdated;
@@ -46,12 +48,16 @@ bool todayKwhUpdated;
 bool yesterdayKwhUpdated;
 
 int use; // Current power usage.
-int temperature;
-int humidity;
+int outsideTemperature;
+int outsideHumidity;
 double totalKwhToday; // KWH used as of today at 00:00 local time.
 int lastUpdatedDay; // the day of month the stats where last updated.
 float yesterdayKwh;
 float todayKwh;
+
+Adafruit_BME280 bme; // I2C
+double insideTemperature;
+double insideHumidity;
 
 MQTT mqttClient(mqttServer, 1883, mqttCallback);
 unsigned long lastMqttConnectAttempt;
@@ -73,14 +79,14 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         }
     } else if (strcmp(topic, "emon/particle/temperature") == 0) {
         int newTemperature = round(atof(p));
-        if (newTemperature != temperature) {
-            temperature = newTemperature;
+        if (newTemperature != outsideTemperature) {
+            outsideTemperature = newTemperature;
             temperatureUpdated = true;
         }
     } else if (strcmp(topic, "emon/particle/humidity") == 0) {
         int newHumidity = atoi(p);
-        if (newHumidity != humidity) {
-            humidity = newHumidity;
+        if (newHumidity != outsideHumidity) {
+            outsideHumidity = newHumidity;
             humidityUpdated = true;
         }
     } else if (strcmp(topic, "emon/nodered/todaykwh") == 0) {
@@ -321,6 +327,21 @@ void setup() {
     nextion.setText(0, "txtLoading", "Downloading power data...");
     
     connectToMQTT();
+
+    unsigned status = bme.begin();
+    if (!status) {
+        Log.info("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
+        Log.info("SensorID was: 0x%X", bme.sensorID());
+    } else {
+        Log.info("Valid BME280 sensor found");
+
+    bme.setSampling(Adafruit_BME280::MODE_NORMAL,
+                    Adafruit_BME280::SAMPLING_X2,  // temperature
+                    Adafruit_BME280::SAMPLING_X16, // pressure
+                    Adafruit_BME280::SAMPLING_X1,  // humidity
+                    Adafruit_BME280::FILTER_X16,
+                    Adafruit_BME280::STANDBY_MS_0_5);
+    }
 }
 
 void loop() {
@@ -388,12 +409,12 @@ void loop() {
 
         if (humidityUpdated) {
             humidityUpdated = false;
-            nextion.setText(1, "txtHumidity", String::format("%d%%", humidity));
+            nextion.setText(1, "txtHumidity", String::format("%d%%", outsideHumidity));
         }
         
         if (temperatureUpdated) {
             temperatureUpdated = false;
-            nextion.setText(1, "txtTemp", String::format("%doC", temperature));
+            nextion.setText(1, "txtTemp", String::format("%doC", outsideTemperature));
         }
 
 
@@ -455,6 +476,35 @@ void loop() {
         Log.info("MQTT Disconnected");
         connectToMQTT();
     }
+
+    if (millis() > nextInternalTemperatureCheck) {
+        nextInternalTemperatureCheck = millis() + INSIDE_TEMPERATURE_UPDATE_INTERVAL;
+        bme.takeForcedMeasurement();
+        double _temperature = round(bme.readTemperature()*2) / 2.0;
+        double _humidity = round(bme.readHumidity()*2) /  2.0;
+        
+        if (_temperature != insideTemperature) {
+            insideTemperature = _temperature;
+            Log.info("Temperature = %.1f *C", insideTemperature);
+            if (mqttClient.isConnected()) {
+                char buffer[5];
+                snprintf(buffer, sizeof buffer, "%.1f", insideTemperature);
+                mqttClient.publish("home/livingroom/temperature", buffer, true);
+            }
+        }
+        
+        if (_humidity != insideHumidity) {
+            insideHumidity = _humidity;
+            Log.info("Humidity = %.1f%%", insideHumidity);
+
+            if (mqttClient.isConnected()) {
+                char buffer[5];
+                snprintf(buffer, sizeof buffer, "%.1f", insideHumidity);
+                mqttClient.publish("home/livingroom/humidity", buffer, true);
+            }
+        }
+    }
+
     /*
     if (!pirState && (millis() - pir_detection_time) < pirDetectionLength)
         sendPirMqttUpdate(true);
