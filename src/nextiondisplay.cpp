@@ -14,8 +14,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length);
 Nextion nextion;
 
 bool firstRun = true;
-/*retained*/ int sleep_state = STATE_AWAKE;
-/*retained*/ int sleep_state_request = STATE_AWAKE;
+int sleep_state = STATE_AWAKE;
+int sleep_state_request = STATE_AWAKE;
 
 bool sofaOccupied = false;
 int sofaPositions[3];
@@ -33,7 +33,7 @@ unsigned long nextWeatherUpdate = 0;
 
 PublishQueue pq;
 
-volatile unsigned long pir_detection_time;
+unsigned long pir_detection_time;
 
 bool useUpdated;
 bool temperatureUpdated;
@@ -52,6 +52,7 @@ float todayKwh;
 Adafruit_BME280 bme; // I2C
 double insideTemperature;
 double insideHumidity;
+unsigned long nextInternalTemperatureCheck;
 
 MQTT mqttClient(mqttServer, 1883, mqttCallback);
 unsigned long lastMqttConnectAttempt;
@@ -256,7 +257,7 @@ void random_seed_from_cloud(unsigned seed) {
     srand(seed);
 }
 
-// STARTUP(System.enableFeature(FEATURE_RETAINED_MEMORY));
+STARTUP(System.enableFeature(FEATURE_RETAINED_MEMORY));
 SYSTEM_THREAD(ENABLED);
 
 void setup() {
@@ -474,17 +475,6 @@ void loop() {
         }
     }
 
-    /*
-    if (!pirState && (millis() - pir_detection_time) < pirDetectionLength)
-        sendPirMqttUpdate(true);
-    else if (pirState &&  (millis() - lastPirMqttUpdate) > pirDetectionLength)
-        sendPirMqttUpdate(false);
-    
-    if (mqttClient.isConnected() && millis() > nextMqttCheckin) {
-        nextMqttCheckin = millis() + 300000;
-        // mqttClient.publish("home/particle/checkin", System.deviceID());
-    }
-    */
     // nextion.setText(1, "txtDebug", String(pir_detection_time));
     pq.process();
     wd.checkin();
