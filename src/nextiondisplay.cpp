@@ -50,8 +50,8 @@ float yesterdayKwh;
 float todayKwh;
 
 Adafruit_BME280 bme; // I2C
-double insideTemperature;
-double insideHumidity;
+// double insideTemperature;
+// int insideHumidity;
 unsigned long nextInternalTemperatureCheck;
 
 MQTT mqttClient(mqttServer, 1883, mqttCallback);
@@ -305,12 +305,11 @@ void setup() {
     } else {
         Log.info("Valid BME280 sensor found");
 
-    bme.setSampling(Adafruit_BME280::MODE_NORMAL,
-                    Adafruit_BME280::SAMPLING_X2,  // temperature
-                    Adafruit_BME280::SAMPLING_X16, // pressure
-                    Adafruit_BME280::SAMPLING_X1,  // humidity
-                    Adafruit_BME280::FILTER_X16,
-                    Adafruit_BME280::STANDBY_MS_0_5);
+    bme.setSampling(Adafruit_BME280::MODE_FORCED,
+                    Adafruit_BME280::SAMPLING_X1, // temperature
+                    Adafruit_BME280::SAMPLING_NONE, // pressure
+                    Adafruit_BME280::SAMPLING_X1, // humidity
+                    Adafruit_BME280::FILTER_OFF);
     }
 }
 
@@ -450,29 +449,29 @@ void loop() {
     if (millis() > nextInternalTemperatureCheck) {
         nextInternalTemperatureCheck = millis() + INSIDE_TEMPERATURE_UPDATE_INTERVAL;
         bme.takeForcedMeasurement();
-        double _temperature = round(bme.readTemperature()*2) / 2.0;
-        double _humidity = round(bme.readHumidity()*2) /  2.0;
+        double insideTemperature = round(bme.readTemperature()*2.0) / 2.0;
+        int insideHumidity = (int) round(bme.readHumidity());
         
-        if (_temperature != insideTemperature) {
-            insideTemperature = _temperature;
+        // if (_temperature != insideTemperature) {
+            // insideTemperature = _temperature;
             Log.info("Temperature = %.1f *C", insideTemperature);
             if (mqttClient.isConnected()) {
                 char buffer[5];
                 snprintf(buffer, sizeof buffer, "%.1f", insideTemperature);
                 mqttClient.publish("home/livingroom/temperature", buffer, true);
             }
-        }
+        // }
         
-        if (_humidity != insideHumidity) {
-            insideHumidity = _humidity;
-            Log.info("Humidity = %.1f%%", insideHumidity);
+        // if (_humidity != insideHumidity) {
+            // insideHumidity = _humidity;
+            Log.info("Humidity = %d%%", insideHumidity);
 
             if (mqttClient.isConnected()) {
-                char buffer[5];
-                snprintf(buffer, sizeof buffer, "%.1f", insideHumidity);
+                char buffer[4];
+                snprintf(buffer, sizeof buffer, "%d", insideHumidity);
                 mqttClient.publish("home/livingroom/humidity", buffer, true);
             }
-        }
+        // }
     }
 
     // nextion.setText(1, "txtDebug", String(pir_detection_time));

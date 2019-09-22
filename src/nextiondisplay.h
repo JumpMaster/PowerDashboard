@@ -6,7 +6,7 @@
 
 const unsigned long DISPLAY_UPDATE_INTERVAL = 10000; // 10 Seconds
 const unsigned long WEATHER_UPDATE_INTERVAL = 7200000; // 2 hours
-const unsigned long INSIDE_TEMPERATURE_UPDATE_INTERVAL = 5000; // 5 seconds
+const unsigned long INSIDE_TEMPERATURE_UPDATE_INTERVAL = 60000; // 1 minute
 const unsigned long DISPLAY_DIM_TIME = 600000; // 10 minutes
 const unsigned long DISPLAY_SLEEP_TIME = 1800000; // 30 minutes
 
