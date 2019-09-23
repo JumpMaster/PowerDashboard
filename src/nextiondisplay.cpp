@@ -50,8 +50,7 @@ float yesterdayKwh;
 float todayKwh;
 
 Adafruit_BME280 bme; // I2C
-// double insideTemperature;
-// int insideHumidity;
+bool bmePresent;
 unsigned long nextInternalTemperatureCheck;
 
 MQTT mqttClient(mqttServer, 1883, mqttCallback);
@@ -298,8 +297,8 @@ void setup() {
     
     connectToMQTT();
 
-    unsigned status = bme.begin();
-    if (!status) {
+    bmePresent = bme.begin();
+    if (!bmePresent) {
         Log.info("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
         Log.info("SensorID was: 0x%X", bme.sensorID());
     } else {
@@ -446,7 +445,7 @@ void loop() {
         connectToMQTT();
     }
 
-    if (millis() > nextInternalTemperatureCheck) {
+    if (bmePresent && millis() > nextInternalTemperatureCheck) {
         nextInternalTemperatureCheck = millis() + INSIDE_TEMPERATURE_UPDATE_INTERVAL;
         bme.takeForcedMeasurement();
         double insideTemperature = round(bme.readTemperature()*2.0) / 2.0;
