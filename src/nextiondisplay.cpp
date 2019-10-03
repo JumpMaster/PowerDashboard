@@ -304,11 +304,11 @@ void setup() {
     } else {
         Log.info("Valid BME280 sensor found");
 
-    bme.setSampling(Adafruit_BME280::MODE_FORCED,
-                    Adafruit_BME280::SAMPLING_X1, // temperature
-                    Adafruit_BME280::SAMPLING_NONE, // pressure
-                    Adafruit_BME280::SAMPLING_X1, // humidity
-                    Adafruit_BME280::FILTER_OFF);
+        bme.setSampling(Adafruit_BME280::MODE_FORCED,
+                        Adafruit_BME280::SAMPLING_X1, // temperature
+                        Adafruit_BME280::SAMPLING_NONE, // pressure
+                        Adafruit_BME280::SAMPLING_X1, // humidity
+                        Adafruit_BME280::FILTER_OFF);
     }
 }
 
@@ -448,7 +448,7 @@ void loop() {
     if (bmePresent && millis() > nextInternalTemperatureCheck) {
         nextInternalTemperatureCheck = millis() + INSIDE_TEMPERATURE_UPDATE_INTERVAL;
         bme.takeForcedMeasurement();
-        double insideTemperature = round(bme.readTemperature()*2.0) / 2.0;
+        double insideTemperature = round(bme.readTemperature()*10.0) / 10.0;
         int insideHumidity = (int) round(bme.readHumidity());
         
         // if (_temperature != insideTemperature) {
