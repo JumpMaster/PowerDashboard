@@ -282,6 +282,8 @@ void setup() {
     
     Particle.subscribe(WEATHER_HOOK_RESP, processWeatherData, MY_DEVICES);
     
+    Particle.publishVitals(900);
+
     Log.info("Display is online");
     
     if (isDST())
