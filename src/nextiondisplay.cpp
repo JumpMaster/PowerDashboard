@@ -1,5 +1,5 @@
 #include "papertrail.h"
-#include "publishqueue.h"
+// #include "publishqueue.h"
 #include "Particle.h"
 #include "nextiondisplay.h"
 #include "Nextion.h"
@@ -31,7 +31,7 @@ int badWeatherCall;
 int weather_state = WEATHER_READY;
 unsigned long nextWeatherUpdate = 0;
 
-PublishQueue pq;
+// PublishQueue pq;
 
 unsigned long pir_detection_time;
 
@@ -102,6 +102,16 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         int seat = topic[15] - '0';
         sofaPositions[seat-1] = atoi(p);
         sofaOccupied = (sofaPositions[0]+sofaPositions[1]+sofaPositions[2]) > 0;
+    } else if (strcmp(topic, "utilities/isDST") == 0) {
+        if (strcmp(p, "true") == 0)
+            Time.beginDST();
+        else
+            Time.endDST();
+        
+        if (Time.isDST())
+            Log.info("DST is active");
+        else
+            Log.info("DST is inactive");
     }
 }
 
@@ -114,49 +124,12 @@ void connectToMQTT() {
         mqttClient.subscribe("emon/nodered/#");
         mqttClient.subscribe("home/sofa/seat/+/position");
         mqttClient.subscribe("home/zigbee2mqtt/living_room_occupancy");
+        mqttClient.subscribe("utilities/#");
     } else
         Log.info("MQTT failed to connect");
 }
 
 ApplicationWatchdog wd(60000, System.reset);
-
-bool isDST()
-{ // (Central) European Summer Timer calculation (last Sunday in March/October)
-    int dayOfMonth = Time.day();
-    int month = Time.month();
-    int dayOfWeek = Time.weekday() - 1; // make Sunday 0 .. Saturday 6
-    
-    if (month >= 4 && month <= 9)
-    { // April to September definetly DST
-        return true;
-    }
-    else if (month < 3 || month > 10)
-    { // before March or after October is definetly standard time
-        return false;
-    }
-    
-    // March and October need deeper examination
-    boolean lastSundayOrAfter = (dayOfMonth - dayOfWeek > 24);
-    if (!lastSundayOrAfter)
-    { // before switching Sunday
-        return (month == 10); // October DST will be true, March not
-    }
-    
-    if (dayOfWeek)
-    { // AFTER the switching Sunday
-        return (month == 3); // for March DST is true, for October not
-    }
-    
-    int secSinceMidnightUTC = Time.now() % 86400;
-    boolean dayStartedAs = (month == 10); // DST in October, in March not
-    // on switching Sunday we need to consider the time
-    if (secSinceMidnightUTC >= 1*3600)
-    { // 1:00 UTC (=1:00 GMT/2:00 BST or 2:00 CET/3:00 CEST)
-        return !dayStartedAs;
-    }
-    
-    return dayStartedAs;
-}
 
 const char *getDayOfMonthSuffix(int n) {
   if (n >= 11 && n <= 13) {
@@ -209,7 +182,7 @@ void getWeather()
 {
     weather_state = WEATHER_REQUESTING;
     // publish the event that will trigger our webhook
-    pq.publish(WEATHER_HOOK_PUB, "");
+    Particle.publish(WEATHER_HOOK_PUB, "", PRIVATE);
     
     unsigned long wait = millis();
     //wait for subscribe to kick in or 5 secs
@@ -285,11 +258,6 @@ void setup() {
     Particle.publishVitals(900);
 
     Log.info("Display is online");
-    
-    if (isDST())
-       Time.beginDST();
-    else
-        Time.endDST();
 
     pir_detection_time = millis();
     
@@ -358,11 +326,6 @@ void loop() {
 
         // DATE
         if (Time.day() != lastDay) {
-            if (isDST())
-                Time.beginDST();
-            else
-                Time.endDST();
-            
             lastDay = Time.day();
             int dayOfWeek = Time.weekday()-1;
             int monthOfYear = Time.month()-1;
@@ -476,6 +439,5 @@ void loop() {
     }
 
     // nextion.setText(1, "txtDebug", String(pir_detection_time));
-    pq.process();
     wd.checkin();
 }
