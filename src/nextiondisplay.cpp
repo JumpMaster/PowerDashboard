@@ -1,5 +1,4 @@
 #include "papertrail.h"
-// #include "publishqueue.h"
 #include "Particle.h"
 #include "nextiondisplay.h"
 #include "Nextion.h"
@@ -14,6 +13,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length);
 Nextion nextion;
 
 bool firstRun = true;
+bool isDebug = false;
 int sleep_state = STATE_AWAKE;
 int sleep_state_request = STATE_AWAKE;
 
@@ -30,8 +30,6 @@ WeatherData weatherData[4];
 int badWeatherCall;
 int weather_state = WEATHER_READY;
 unsigned long nextWeatherUpdate = 0;
-
-// PublishQueue pq;
 
 unsigned long pir_detection_time;
 
@@ -132,15 +130,15 @@ void connectToMQTT() {
 ApplicationWatchdog wd(60000, System.reset);
 
 const char *getDayOfMonthSuffix(int n) {
-  if (n >= 11 && n <= 13) {
-    return "th";
-  }
-  switch (n % 10) {
-    case 1:  return (char *) "st";
-    case 2:  return "nd";
-    case 3:  return "rd";
-    default: return "th";
-  }
+    if (n >= 11 && n <= 13) {
+        return "th";
+    }
+    switch (n % 10) {
+        case 1:  return (char *) "st";
+        case 2:  return "nd";
+        case 3:  return "rd";
+        default: return "th";
+    }
 }
 
 int weatherDescriptionToInt(char *description, bool mainImage)
@@ -197,7 +195,7 @@ void getWeather()
         if (badWeatherCall > 4)		//If 5 webhook calls fail in a row, do a system reset
             System.reset();
     }
-}//End of getWeather function
+} //End of getWeather function
 
 void processWeatherData(const char *name, const char *data) {
     
@@ -229,7 +227,6 @@ void random_seed_from_cloud(unsigned seed) {
     srand(seed);
 }
 
-STARTUP(System.enableFeature(FEATURE_RETAINED_MEMORY));
 SYSTEM_THREAD(ENABLED);
 
 void setup() {
@@ -275,20 +272,19 @@ void setup() {
         Log.info("Valid BME280 sensor found");
 
         bme.setSampling(Adafruit_BME280::MODE_FORCED,
-                        Adafruit_BME280::SAMPLING_X1, // temperature
+                        Adafruit_BME280::SAMPLING_X1,   // temperature
                         Adafruit_BME280::SAMPLING_NONE, // pressure
-                        Adafruit_BME280::SAMPLING_X1, // humidity
+                        Adafruit_BME280::SAMPLING_X1,   // humidity
                         Adafruit_BME280::FILTER_OFF);
     }
 }
 
 void loop() {
-  unsigned long current_millis = millis();
+    unsigned long current_millis = millis();
 
-  if (sleep_state == STATE_AWAKE)
-  {
-    if (current_millis > nextWeatherUpdate && weather_state == WEATHER_READY)
-        getWeather();
+    if (sleep_state == STATE_AWAKE) {
+        if (current_millis > nextWeatherUpdate && weather_state == WEATHER_READY)
+            getWeather();
 
 
         if (useUpdated) {
@@ -351,56 +347,55 @@ void loop() {
         }
 
 
-    if (weather_state == WEATHER_AVAILABLE)
-    {
-        nextion.setPic(1, "imgWeather", todayIcon);
-        
-        for (int i = 0; i <= 3; i++) {            
-            nextion.setText(1, "txtDay"+String(i+1), daysOfWeek[weatherData[i].weekday]);
-            nextion.setPic(1, "imgDay"+String(i+1), weatherData[i].icon);
-            nextion.setText(1, "txtTemp"+String(i+1), String::format("%doC  %doC", weatherData[i].high, weatherData[i].low));
+        if (weather_state == WEATHER_AVAILABLE) {
+
+            nextion.setPic(1, "imgWeather", todayIcon);
             
+            for (int i = 0; i <= 3; i++) {            
+                nextion.setText(1, "txtDay"+String(i+1), daysOfWeek[weatherData[i].weekday]);
+                nextion.setPic(1, "imgDay"+String(i+1), weatherData[i].icon);
+                nextion.setText(1, "txtTemp"+String(i+1), String::format("%doC  %doC", weatherData[i].high, weatherData[i].low));
+                
+            }
+            weather_state = WEATHER_READY;
         }
-        weather_state = WEATHER_READY;
-    }
 
-    if (firstRun) {
-      firstRun = false;
-      nextion.setPage(1);
-      nextion.setText(0, "txtLoading", "Booting...");
+        if (firstRun) {
+            firstRun = false;
+            nextion.setPage(1);
+            nextion.setText(0, "txtLoading", "Booting...");
+        }
     }
-  }
   
-  if (sleep_state == STATE_AWAKE && !sofaOccupied && (current_millis - pir_detection_time) >= DISPLAY_DIM_TIME)
-    sleep_state_request = STATE_DIM_SCREEN;
-  else if (sleep_state == STATE_DIM_SCREEN && (current_millis - pir_detection_time) >= DISPLAY_SLEEP_TIME)
-    sleep_state_request = STATE_SCREEN_OFF;
-  else if (sleep_state > STATE_AWAKE && (current_millis - pir_detection_time) < DISPLAY_DIM_TIME)
-    sleep_state_request = STATE_AWAKE;
-
-  if (sleep_state != sleep_state_request)
-  {
-    switch (sleep_state_request)
-    {
-      case STATE_AWAKE:
-        nextion.setSleep(false);
-        delay(200);
-        nextion.setBrightness(DISPLAY_BRIGHTNESS);
-        if (sleep_state == STATE_SCREEN_OFF)
-            nextion.setText(0, "txtLoading", "Initialising...");
-        break;
-      case STATE_DIM_SCREEN:
-        nextion.setBrightness(0);
-        break;
-      case STATE_SCREEN_OFF:
-        nextion.setPage(0);
-        nextion.setSleep(true);
-        firstRun = true;
-        Log.info("Display is going to sleep");
-        break;
+    if (sleep_state == STATE_AWAKE && !sofaOccupied && (current_millis - pir_detection_time) >= DISPLAY_DIM_TIME) {
+        sleep_state_request = STATE_DIM_SCREEN;
+    } else if (sleep_state == STATE_DIM_SCREEN && (current_millis - pir_detection_time) >= DISPLAY_SLEEP_TIME) {
+        sleep_state_request = STATE_SCREEN_OFF;
+    } else if (sleep_state > STATE_AWAKE && (current_millis - pir_detection_time) < DISPLAY_DIM_TIME) {
+        sleep_state_request = STATE_AWAKE;
     }
-    sleep_state = sleep_state_request;
-  }
+
+    if (sleep_state != sleep_state_request) {
+        switch (sleep_state_request) {
+            case STATE_AWAKE:
+                nextion.setSleep(false);
+                delay(200);
+                nextion.setBrightness(DISPLAY_BRIGHTNESS);
+                if (sleep_state == STATE_SCREEN_OFF)
+                    nextion.setText(0, "txtLoading", "Initialising...");
+                break;
+            case STATE_DIM_SCREEN:
+                nextion.setBrightness(0);
+                break;
+            case STATE_SCREEN_OFF:
+                nextion.setPage(0);
+                nextion.setSleep(true);
+                firstRun = true;
+                Log.info("Display is going to sleep");
+                break;
+        }
+        sleep_state = sleep_state_request;
+    }
 
 
     if (mqttClient.isConnected()) {
@@ -415,27 +410,24 @@ void loop() {
         bme.takeForcedMeasurement();
         double insideTemperature = round(bme.readTemperature()*10.0) / 10.0;
         int insideHumidity = (int) round(bme.readHumidity());
-        
-        // if (_temperature != insideTemperature) {
-            // insideTemperature = _temperature;
+
+        if (isDebug)
             Log.info("Temperature = %.1f *C", insideTemperature);
-            if (mqttClient.isConnected()) {
-                char buffer[5];
-                snprintf(buffer, sizeof buffer, "%.1f", insideTemperature);
-                mqttClient.publish("home/livingroom/temperature", buffer, true);
-            }
-        // }
-        
-        // if (_humidity != insideHumidity) {
-            // insideHumidity = _humidity;
+
+        if (mqttClient.isConnected()) {
+            char buffer[5];
+            snprintf(buffer, sizeof buffer, "%.1f", insideTemperature);
+            mqttClient.publish("home/livingroom/temperature", buffer, true);
+        }
+
+        if (isDebug)
             Log.info("Humidity = %d%%", insideHumidity);
 
-            if (mqttClient.isConnected()) {
-                char buffer[4];
-                snprintf(buffer, sizeof buffer, "%d", insideHumidity);
-                mqttClient.publish("home/livingroom/humidity", buffer, true);
-            }
-        // }
+        if (mqttClient.isConnected()) {
+            char buffer[4];
+            snprintf(buffer, sizeof buffer, "%d", insideHumidity);
+            mqttClient.publish("home/livingroom/humidity", buffer, true);
+        }
     }
 
     // nextion.setText(1, "txtDebug", String(pir_detection_time));
