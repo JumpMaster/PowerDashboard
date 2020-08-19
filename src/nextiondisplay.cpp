@@ -6,6 +6,7 @@
 #include "secrets.h"
 #include "Adafruit_Sensor.h"
 #include "Adafruit_BME280.h"
+#include "DiagnosticsHelperRK.h"
 
 // Stubs
 void mqttCallback(char* topic, byte* payload, unsigned int length);
@@ -20,7 +21,10 @@ int sleep_state_request = STATE_AWAKE;
 bool sofaOccupied = false;
 int sofaPositions[3];
 
-unsigned long resetTime = 0;
+uint32_t resetTime = 0;
+retained uint32_t lastHardResetTime;
+retained int resetCount;
+
 int lastDay;
 int lastUsePic;
 int todayIcon = 14;
@@ -46,6 +50,8 @@ double totalKwhToday; // KWH used as of today at 00:00 local time.
 int lastUpdatedDay; // the day of month the stats where last updated.
 float yesterdayKwh;
 float todayKwh;
+
+ApplicationWatchdog *wd;
 
 Adafruit_BME280 bme; // I2C
 bool bmePresent;
@@ -127,7 +133,23 @@ void connectToMQTT() {
         Log.info("MQTT failed to connect");
 }
 
-ApplicationWatchdog wd(60000, System.reset);
+uint32_t nextMetricsUpdate = 0;
+void sendTelegrafMetrics() {
+    if (millis() > nextMetricsUpdate) {
+        nextMetricsUpdate = millis() + 30000;
+
+        char buffer[150];
+        snprintf(buffer, sizeof(buffer),
+            "status,device=Nextion uptime=%d,resetReason=%d,firmware=\"%s\",memTotal=%ld,memFree=%ld",
+            System.uptime(),
+            System.resetReason(),
+            System.version().c_str(),
+            DiagnosticsHelper::getValue(DIAG_ID_SYSTEM_TOTAL_RAM),
+            DiagnosticsHelper::getValue(DIAG_ID_SYSTEM_USED_RAM)
+            );
+        mqttClient.publish("telegraf/particle", buffer);
+    }
+}
 
 const char *getDayOfMonthSuffix(int n) {
     if (n >= 11 && n <= 13) {
@@ -227,25 +249,48 @@ void random_seed_from_cloud(unsigned seed) {
     srand(seed);
 }
 
-SYSTEM_THREAD(ENABLED);
+SYSTEM_THREAD(ENABLED)
+
+void startupMacro() {
+    System.enableFeature(FEATURE_RESET_INFO);
+    System.enableFeature(FEATURE_RETAINED_MEMORY);
+}
+STARTUP(startupMacro());
 
 void setup() {
-    
-    nexSerial.begin(115200);
-    nextion.setSleep(false);
-    delay(200);
-    nextion.setBrightness(DISPLAY_BRIGHTNESS);
-    nextion.setText(0, "txtLoading", "Initialising...");
+  wd = new ApplicationWatchdog(60000, System.reset, 1536);
+
+  nexSerial.begin(115200);
+  delay(200);
+  nextion.setSleep(false);
+  delay(200);
+  nextion.setBrightness(DISPLAY_BRIGHTNESS);
+  nextion.setText(0, "txtLoading", "Initialising...");
  
     waitFor(Particle.connected, 30000);
     
-    if (!Particle.connected)
-        System.reset();
-    
     do {
         resetTime = Time.now();
-        delay(10);
-    } while (resetTime < 1000000UL && millis() < 20000);
+        Particle.process();
+    } while (resetTime < 1500000000 || millis() < 10000);
+    
+    if (System.resetReason() == RESET_REASON_PANIC) {
+        if ((Time.now() - lastHardResetTime) < 120) {
+            resetCount++;
+        } else {
+            resetCount = 1;
+        }
+
+        lastHardResetTime = Time.now();
+
+        if (resetCount > 3) {
+            System.enterSafeMode();
+        }
+    } else if (System.resetReason() == RESET_REASON_WATCHDOG) {
+      Log.info("RESET BY WATCHDOG");
+    } else {
+        resetCount = 0;
+    }
     
     Particle.variable("resetTime", &resetTime, INT);
     Particle.function("nextionrun", nextionrun);
@@ -267,7 +312,7 @@ void setup() {
     bmePresent = bme.begin();
     if (!bmePresent) {
         Log.info("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
-        Log.info("SensorID was: 0x%X", bme.sensorID());
+        Log.info("SensorID was: 0x%lx", bme.sensorID());
     } else {
         Log.info("Valid BME280 sensor found");
 
@@ -427,9 +472,10 @@ void loop() {
             char buffer[4];
             snprintf(buffer, sizeof buffer, "%d", insideHumidity);
             mqttClient.publish("home/livingroom/humidity", buffer, true);
+            sendTelegrafMetrics();
         }
     }
 
     // nextion.setText(1, "txtDebug", String(pir_detection_time));
-    wd.checkin();
+    wd->checkin();  // resets the AWDT count
 }
