@@ -61,7 +61,13 @@ MQTT mqttClient(mqttServer, 1883, mqttCallback);
 unsigned long lastMqttConnectAttempt;
 const int mqttConnectAtemptTimeout = 5000;
 
-PapertrailLogHandler papertrailHandler(papertrailAddress, papertrailPort, "Nextion Display");
+PapertrailLogHandler papertrailHandler(papertrailAddress, papertrailPort,
+  papertrailDeviceName, System.deviceID(),
+  LOG_LEVEL_NONE, {
+  { "app", LOG_LEVEL_ALL }
+  // TOO MUCH!!! { “system”, LOG_LEVEL_ALL },
+  // TOO MUCH!!! { “comm”, LOG_LEVEL_ALL }
+});
 
 // recieve message
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -99,8 +105,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             yesterdayKwh = newYesterdayKwh;
             yesterdayKwhUpdated = true;
         }
-    } else if (strcmp(topic, "home/zigbee2mqtt/living_room_occupancy") == 0) {
-        if (strstr(p, "\"occupancy\":true"))
+    } else if (strcmp(topic, "home/homeassistant/binary_sensor/living_room_occupancy/state") == 0) {
+        if (strcmp(p, "on") == 0)
             pir_detection_time = millis();
     } else if (strncmp(topic, "home/sofa/seat/", 15) == 0) {
         int seat = topic[15] - '0';
@@ -127,7 +133,7 @@ void connectToMQTT() {
         mqttClient.subscribe("emon/particle/#");
         mqttClient.subscribe("emon/nodered/#");
         mqttClient.subscribe("home/sofa/seat/+/position");
-        mqttClient.subscribe("home/zigbee2mqtt/living_room_occupancy");
+        mqttClient.subscribe("home/homeassistant/binary_sensor/living_room_occupancy/state");
         mqttClient.subscribe("utilities/#");
     } else
         Log.info("MQTT failed to connect");
@@ -462,7 +468,7 @@ void loop() {
         if (mqttClient.isConnected()) {
             char buffer[5];
             snprintf(buffer, sizeof buffer, "%.1f", insideTemperature);
-            mqttClient.publish("home/livingroom/temperature", buffer, true);
+            mqttClient.publish("home/temperature/livingroom", buffer, true);
         }
 
         if (isDebug)
@@ -471,7 +477,7 @@ void loop() {
         if (mqttClient.isConnected()) {
             char buffer[4];
             snprintf(buffer, sizeof buffer, "%d", insideHumidity);
-            mqttClient.publish("home/livingroom/humidity", buffer, true);
+            mqttClient.publish("home/humidity/livingroom", buffer, true);
             sendTelegrafMetrics();
         }
     }
