@@ -1,6 +1,6 @@
 #include "papertrail.h"
 #include "Particle.h"
-#include "nextiondisplay.h"
+#include "PowerDashboard.h"
 #include "Nextion.h"
 #include "mqtt.h"
 #include "secrets.h"
@@ -105,7 +105,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             yesterdayKwh = newYesterdayKwh;
             yesterdayKwhUpdated = true;
         }
-    } else if (strcmp(topic, "home/homeassistant/binary_sensor/living_room_occupancy/state") == 0) {
+    } else if (strcmp(topic, "home/homeassistant/binary_sensor/living_room_motion/state") == 0) {
         if (strcmp(p, "on") == 0)
             pir_detection_time = millis();
     } else if (strncmp(topic, "home/sofa/seat/", 15) == 0) {
@@ -133,7 +133,7 @@ void connectToMQTT() {
         mqttClient.subscribe("emon/particle/#");
         mqttClient.subscribe("emon/nodered/#");
         mqttClient.subscribe("home/sofa/seat/+/position");
-        mqttClient.subscribe("home/homeassistant/binary_sensor/living_room_occupancy/state");
+        mqttClient.subscribe("home/homeassistant/binary_sensor/living_room_motion/state");
         mqttClient.subscribe("utilities/#");
     } else
         Log.info("MQTT failed to connect");
@@ -146,12 +146,13 @@ void sendTelegrafMetrics() {
 
         char buffer[150];
         snprintf(buffer, sizeof(buffer),
-            "status,device=Nextion uptime=%d,resetReason=%d,firmware=\"%s\",memTotal=%ld,memFree=%ld",
+            "status,device=Nextion uptime=%d,resetReason=%d,firmware=\"%s\",memTotal=%ld,memFree=%ld,ipv4=\"%s\"",
             System.uptime(),
             System.resetReason(),
             System.version().c_str(),
             DiagnosticsHelper::getValue(DIAG_ID_SYSTEM_TOTAL_RAM),
-            DiagnosticsHelper::getValue(DIAG_ID_SYSTEM_USED_RAM)
+            DiagnosticsHelper::getValue(DIAG_ID_SYSTEM_USED_RAM),
+            WiFi.localIP().toString().c_str()
             );
         mqttClient.publish("telegraf/particle", buffer);
     }
@@ -247,7 +248,7 @@ void processWeatherData(const char *name, const char *data) {
 
 int nextionrun(String command)
 {
-    nextion.run(command);
+    nextion.execute(command);
     return 0;
 }
 
@@ -264,14 +265,14 @@ void startupMacro() {
 STARTUP(startupMacro());
 
 void setup() {
-  wd = new ApplicationWatchdog(60000, System.reset, 1536);
+    wd = new ApplicationWatchdog(60000, System.reset, 1536);
 
-  nexSerial.begin(115200);
-  delay(200);
-  nextion.setSleep(false);
-  delay(200);
-  nextion.setBrightness(DISPLAY_BRIGHTNESS);
-  nextion.setText(0, "txtLoading", "Initialising...");
+    nexSerial.begin(115200);
+    delay(200);
+    nextion.setSleep(false);
+    delay(200);
+    nextion.setBrightness(DISPLAY_BRIGHTNESS);
+    nextion.setText(0, "txtLoading", "Initialising...");
  
     waitFor(Particle.connected, 30000);
     
@@ -483,5 +484,6 @@ void loop() {
     }
 
     // nextion.setText(1, "txtDebug", String(pir_detection_time));
+    nextion.loop();
     wd->checkin();  // resets the AWDT count
 }
