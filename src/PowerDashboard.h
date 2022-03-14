@@ -16,7 +16,7 @@ const char * monthsOfYear[12] = {"January", "February", "March", "April", "May",
 const int TIMEZONE_OFFSET = 0;
 const int gauge_max = 4000;
 const int DISPLAY_BRIGHTNESS = 50;
-const int PIR_PIN = WKP;
+// const int PIR_PIN = WKP;
 
 // If Content-Length isn't given this is used for the body length increments
 const int kFallbackContentLength = 100;

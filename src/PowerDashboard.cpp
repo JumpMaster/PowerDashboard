@@ -5,7 +5,6 @@
 #include "mqtt.h"
 #include "secrets.h"
 #include "Adafruit_Sensor.h"
-#include "Adafruit_BME280.h"
 #include "DiagnosticsHelperRK.h"
 
 // Stubs
@@ -52,10 +51,6 @@ float yesterdayKwh;
 float todayKwh;
 
 ApplicationWatchdog *wd;
-
-Adafruit_BME280 bme; // I2C
-bool bmePresent;
-unsigned long nextInternalTemperatureCheck;
 
 MQTT mqttClient(mqttServer, 1883, mqttCallback);
 unsigned long lastMqttConnectAttempt;
@@ -267,7 +262,7 @@ STARTUP(startupMacro());
 void setup() {
     wd = new ApplicationWatchdog(60000, System.reset, 1536);
 
-    nexSerial.begin(115200);
+    nexSerial.begin(9600);
     delay(200);
     nextion.setSleep(false);
     delay(200);
@@ -315,20 +310,6 @@ void setup() {
     nextion.setText(0, "txtLoading", "Downloading power data...");
     
     connectToMQTT();
-
-    bmePresent = bme.begin();
-    if (!bmePresent) {
-        Log.info("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
-        Log.info("SensorID was: 0x%lx", bme.sensorID());
-    } else {
-        Log.info("Valid BME280 sensor found");
-
-        bme.setSampling(Adafruit_BME280::MODE_FORCED,
-                        Adafruit_BME280::SAMPLING_X1,   // temperature
-                        Adafruit_BME280::SAMPLING_NONE, // pressure
-                        Adafruit_BME280::SAMPLING_X1,   // humidity
-                        Adafruit_BME280::FILTER_OFF);
-    }
 }
 
 void loop() {
@@ -452,35 +433,10 @@ void loop() {
 
     if (mqttClient.isConnected()) {
         mqttClient.loop();
+        sendTelegrafMetrics();
     } else if (millis() > (lastMqttConnectAttempt + mqttConnectAtemptTimeout)) {
         Log.info("MQTT Disconnected");
         connectToMQTT();
-    }
-
-    if (bmePresent && millis() > nextInternalTemperatureCheck) {
-        nextInternalTemperatureCheck = millis() + INSIDE_TEMPERATURE_UPDATE_INTERVAL;
-        bme.takeForcedMeasurement();
-        double insideTemperature = round(bme.readTemperature()*10.0) / 10.0;
-        int insideHumidity = (int) round(bme.readHumidity());
-
-        if (isDebug)
-            Log.info("Temperature = %.1f *C", insideTemperature);
-
-        if (mqttClient.isConnected()) {
-            char buffer[5];
-            snprintf(buffer, sizeof buffer, "%.1f", insideTemperature);
-            mqttClient.publish("home/temperature/livingroom", buffer, true);
-        }
-
-        if (isDebug)
-            Log.info("Humidity = %d%%", insideHumidity);
-
-        if (mqttClient.isConnected()) {
-            char buffer[4];
-            snprintf(buffer, sizeof buffer, "%d", insideHumidity);
-            mqttClient.publish("home/humidity/livingroom", buffer, true);
-            sendTelegrafMetrics();
-        }
     }
 
     // nextion.setText(1, "txtDebug", String(pir_detection_time));
